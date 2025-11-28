@@ -11,7 +11,7 @@ clap = { version = "4.1.1", features = ["derive"] }
 bam = "0.1.4"
 rayon = "1.6.1"
 merge_sequences  = { git = "https://github.com/Dr-TSteimle/merge_sequences.git" }
-desc_sequence    = { git = "https://github.com/Dr-TSteimle/desc_sequence.git" }
+desc_sequence    = { path = "deps/desc_sequence" }
 rand = "0.9"
 rust-lapper = "1.1.0"
 anyhow = "1.0.93"
