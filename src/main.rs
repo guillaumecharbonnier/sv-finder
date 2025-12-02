@@ -12,6 +12,8 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+mod gtf;
+use gtf::{load_gtf, Gene};
 
 use bam::record::tags::TagValue::String as BamString;
 use desc_sequence::*;
@@ -101,9 +103,38 @@ struct Args {
         long_help = "repeat masker gz file path from UCSC (rmsk.txt.gz)\n\t- hg19: https://hgdownload.soe.ucsc.edu/goldenPath/hg19/database/rmsk.txt.gz\n\t- hg38: https://hgdownload.soe.ucsc.edu/goldenPath/hg38/database/rmsk.txt.gz"
     )]
     repeat_masker: Option<String>,
+
+    #[arg(
+        short = 'g',
+        long = "gtf",
+        long_help = "Optional GTF file to annotate SVs with overlapping gene names"
+    )]
+    gtf_path: Option<String>,
 }
 // target/debug/sv-finder -b /Turbine-pool/LAL-T/data/V4-NextSeq/200604-SureSelect_Capture_V4/2005N140862-BETYA/aln.sorted.bam -f /home/thomas/NGS/ref/hg19.fa -p 30 -c cytoBandIdeo_hg19.txt -o new
 //  new_result.txt | grep "chr2:g.pter_43454037[chr14:g.22918105_qterinv]"
+
+/// Annotates an SV with overlapping gene names from a GTF-derived gene map.
+/// Returns a comma-separated list of gene names or None if no genes overlap.
+fn annotate_sv(chrom: &str, sv_start: u64, sv_end: u64, genes: &HashMap<String, Vec<Gene>>) -> Option<String> {
+    if let Some(glist) = genes.get(chrom) {
+        let mut hits: Vec<String> = Vec::new();
+        for g in glist {
+            if g.end >= sv_start && g.start <= sv_end {
+                hits.push(g.name.clone());
+            }
+        }
+        if hits.is_empty() {
+            None
+        } else {
+            hits.sort();
+            hits.dedup();
+            Some(hits.join(","))
+        }
+    } else {
+        None
+    }
+}
 
 fn main() {
     let now = Instant::now();
@@ -367,6 +398,18 @@ fn main() {
     } else {
         HashMap::new()
     };
+    let genes_map: HashMap<String, Vec<Gene>> = if let Some(gtf_path) = &args.gtf_path {
+        eprintln!("[GTF loader] Loading GTF from {:?}", gtf_path);
+        match load_gtf(std::path::Path::new(gtf_path)) {
+            Ok(genes) => genes,
+            Err(e) => {
+                eprintln!("[GTF loader] Error loading GTF: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        HashMap::new()
+    };
     res.iter().for_each(|(name, sequence)| {
         let mut res = Result::new(name.to_string(), sequence.as_string());
         // res.align(&args.fasta_ref_path, &centro_pos);
@@ -375,6 +418,9 @@ fn main() {
 
         if args.repeat_masker.is_some() {
             res.check_repeat(&lappers);
+        }
+        if !genes_map.is_empty() {
+            res.annotate_genes(&genes_map);
         }
         if res.hgvs.is_some() {
             writeln!(result_file, "{}", res.print_tsv_line()).unwrap();
@@ -500,6 +546,7 @@ pub struct Result {
     pub ranges: Option<Vec<FullRange>>,
     pub hgvs: Option<Vec<String>>,
     pub on_repeat: Option<bool>,
+    pub overlapping_genes: Option<String>,
 }
 
 impl Result {
@@ -510,6 +557,7 @@ impl Result {
             ranges: None,
             hgvs: None,
             on_repeat: None,
+            overlapping_genes: None,
         }
     }
 
@@ -590,14 +638,35 @@ impl Result {
             "NA"
         };
 
+        let genes = self.overlapping_genes.as_deref().unwrap_or("");
+
         [
             self.name.clone(),
             str_ranges,
             str_hgvs,
             self.sequence.clone(),
             rep.to_string(),
+            genes.to_string(),
         ]
         .join("\t")
+    }
+
+    pub fn annotate_genes(&mut self, genes_map: &HashMap<String, Vec<Gene>>) {
+        if let Some(ranges) = &self.ranges {
+            let mut all_genes: Vec<String> = Vec::new();
+            for ((chr, start, end), _) in ranges {
+                if let Some(annotation) = annotate_sv(chr, *start as u64, *end as u64, genes_map) {
+                    for gene in annotation.split(',') {
+                        all_genes.push(gene.to_string());
+                    }
+                }
+            }
+            if !all_genes.is_empty() {
+                all_genes.sort();
+                all_genes.dedup();
+                self.overlapping_genes = Some(all_genes.join(","));
+            }
+        }
     }
 
     pub fn check_repeat(&mut self, lappers: &HashMap<String, Lapper<u32, String>>) {
