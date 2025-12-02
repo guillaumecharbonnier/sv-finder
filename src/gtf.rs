@@ -45,21 +45,54 @@ pub fn load_gtf(path: &Path) -> anyhow::Result<HashMap<String, Vec<Gene>>> {
             continue;
         }
 
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 9 {
-            continue;
-        }
+        // Use iterator approach to check field count without collecting all fields
+        let mut fields_iter = line.split('\t');
+        let chrom = match fields_iter.next() {
+            Some(c) => c.to_string(),
+            None => continue,
+        };
+        // Skip source (field 1)
+        fields_iter.next();
+        let feature_type = match fields_iter.next() {
+            Some(f) => f,
+            None => continue,
+        };
 
-        let feature_type = fields[2];
         // Only process "gene" features
         if feature_type != "gene" {
             continue;
         }
 
-        let chrom = fields[0].to_string();
-        let start: u64 = fields[3].parse().unwrap_or(0);
-        let end: u64 = fields[4].parse().unwrap_or(0);
-        let attributes = fields[8];
+        let start_str = match fields_iter.next() {
+            Some(s) => s,
+            None => continue,
+        };
+        let end_str = match fields_iter.next() {
+            Some(e) => e,
+            None => continue,
+        };
+
+        // Parse start and end, skip invalid entries
+        let start: u64 = match start_str.parse() {
+            Ok(s) => s,
+            Err(_) => continue, // Skip entries with invalid start coordinates
+        };
+        let end: u64 = match end_str.parse() {
+            Ok(e) => e,
+            Err(_) => continue, // Skip entries with invalid end coordinates
+        };
+
+        // Skip score (field 5), strand (field 6), frame (field 7)
+        for _ in 0..3 {
+            if fields_iter.next().is_none() {
+                continue;
+            }
+        }
+
+        let attributes = match fields_iter.next() {
+            Some(a) => a,
+            None => continue,
+        };
 
         // Extract gene_name or gene_id from attributes
         let gene_name = extract_gene_name(attributes);

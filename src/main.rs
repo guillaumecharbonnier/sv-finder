@@ -400,10 +400,13 @@ fn main() {
     };
     let genes_map: HashMap<String, Vec<Gene>> = if let Some(gtf_path) = &args.gtf_path {
         eprintln!("[GTF loader] Loading GTF from {:?}", gtf_path);
-        load_gtf(std::path::Path::new(gtf_path)).unwrap_or_else(|e| {
-            eprintln!("[GTF loader] Error loading GTF: {}", e);
-            HashMap::new()
-        })
+        match load_gtf(std::path::Path::new(gtf_path)) {
+            Ok(genes) => genes,
+            Err(e) => {
+                eprintln!("[GTF loader] Error loading GTF: {}", e);
+                std::process::exit(1);
+            }
+        }
     } else {
         HashMap::new()
     };
@@ -635,7 +638,7 @@ impl Result {
             "NA"
         };
 
-        let genes = self.overlapping_genes.clone().unwrap_or_default();
+        let genes = self.overlapping_genes.as_deref().unwrap_or("");
 
         [
             self.name.clone(),
@@ -643,7 +646,7 @@ impl Result {
             str_hgvs,
             self.sequence.clone(),
             rep.to_string(),
-            genes,
+            genes.to_string(),
         ]
         .join("\t")
     }
